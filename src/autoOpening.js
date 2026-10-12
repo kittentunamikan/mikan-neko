@@ -1,66 +1,41 @@
-// Runtime access uses the exposed game objects after the client patch loads.
-
 const STORE = "fx_auto_opening";
-const PANEL_ID = "fx-auto-opening-panel";
 const CHECK_MS = 20;
 const LATE_TICKS = 10;
 const MAX_STEPS = 200;
 
 const defaults = {
   enabled: false,
-  transparentHeader: false,
-  collapsed: false,
-  steps: [
-    { t: 62, p: 25.98 },
-    { t: 164, p: 30.96 },
-    { t: 259, p: 32.52 }
-  ]
+  steps: [{ t: 62, p: 25.98 }, { t: 164, p: 30.96 }, { t: 259, p: 32.52 }]
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const round2 = value => Math.round(value * 100) / 100;
+const cloneDefaults = () => ({ ...defaults, steps: defaults.steps.map(step => ({ ...step })) });
 
 function parseSteps(text) {
-  const parsed = [];
+  const result = [];
   String(text).split(/\r?\n/).forEach(raw => {
     const line = raw.replace(/#.*$/, "").trim();
-    if (!line) return;
     const match = line.match(/^(\d+(?:\.\d+)?)\s*[:,\s]\s*(\d+(?:\.\d+)?)\s*%?$/);
     if (!match) return;
     const tick = Math.round(Number(match[1]));
     const percent = Number(match[2]);
-    if (tick < 0 || tick > 1000000 || percent < 1 || percent > 100) return;
-    parsed.push({ t: tick, p: round2(percent) });
+    if (tick >= 0 && tick <= 1000000 && percent >= 1 && percent <= 100) result.push({ t: tick, p: round2(percent) });
   });
-  parsed.sort((a, b) => a.t - b.t);
-  return parsed.slice(0, MAX_STEPS);
+  return result.sort((a, b) => a.t - b.t).slice(0, MAX_STEPS);
 }
 
-function stepsToText(steps) {
-  return steps.map(step => `${step.t} ${step.p.toFixed(2)}`).join("\n");
-}
-
-function cloneDefaults() {
-  return { ...defaults, steps: defaults.steps.map(step => ({ ...step })) };
-}
+const stepsToText = steps => steps.map(step => `${step.t} ${step.p.toFixed(2)}`).join("\n");
 
 function loadConfig() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || "null");
     if (!saved || typeof saved !== "object") return cloneDefaults();
-    return {
-      ...defaults,
-      ...saved,
-      steps: Array.isArray(saved.steps) ? parseSteps(stepsToText(saved.steps)) : defaults.steps
-    };
-  } catch {
-    return cloneDefaults();
-  }
+    return { ...defaults, ...saved, steps: Array.isArray(saved.steps) ? parseSteps(stepsToText(saved.steps)) : cloneDefaults().steps };
+  } catch { return cloneDefaults(); }
 }
 
-function saveConfig(config) {
-  localStorage.setItem(STORE, JSON.stringify(config));
-}
+const saveConfig = config => localStorage.setItem(STORE, JSON.stringify(config));
 
 function gameApi() {
   const w = window;
@@ -68,14 +43,6 @@ function gameApi() {
   if (!w.bv || typeof w.bv.i5 !== "function") return null;
   if (!w.bD?.gv || typeof w.bD.gv.hk !== "function" || typeof w.bD.gv.hl !== "function") return null;
   return w;
-}
-
-function tickOf(w) {
-  try {
-    return typeof w.bi?.kr === "function" ? w.bi.kr() : null;
-  } catch {
-    return null;
-  }
 }
 
 function levelForPercent(w, percent, player) {
@@ -102,134 +69,91 @@ function hasFreeAttack(w, player, neutral) {
   return attack.kF(player, neutral) || attack.kY(player);
 }
 
-function isSingleplayer(w) {
-  return w.aE.lE === true && w.aE.hi !== true;
-}
-
-function makeElement(tag, className, text) {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text !== undefined) element.textContent = text;
-  return element;
-}
-
 class AutoOpening {
   constructor() {
     this.config = loadConfig();
-    this.state = { index: 0, lastTick: -1, wasInGame: false, sent: 0, skipped: 0, status: "Idle", tone: "muted" };
-    this.timer = 0;
-    this.panel = null;
-    this.body = null;
-    this.status = null;
-    this.toggleButton = null;
-    this.header = null;
-    this.mount();
+    this.state = { index: 0, lastTick: -1, wasInGame: false, sent: 0, skipped: 0, status: "Stopped", tone: "muted" };
+    window.setInterval(() => {
+      this.step();
+      this.syncCatPanel();
+      this.updateCatPanel();
+    }, CHECK_MS);
   }
 
-  mount() {
-    if (document.getElementById(PANEL_ID)) return;
-    this.panel = makeElement("section", "fx-auto-opening");
-    this.panel.id = PANEL_ID;
-    this.header = makeElement("header", "fx-auto-opening-header");
-    const title = makeElement("strong", "fx-auto-opening-title", "Auto opening");
-    const collapse = makeElement("button", "fx-auto-opening-icon", "-");
-    collapse.type = "button";
-    collapse.title = "Collapse";
-    collapse.addEventListener("click", () => this.setCollapsed(!this.config.collapsed));
-    this.header.append(title, collapse);
-
-    this.body = makeElement("div", "fx-auto-opening-body");
-    this.toggleButton = makeElement("button", "fx-auto-opening-wide");
-    this.toggleButton.type = "button";
-    this.toggleButton.addEventListener("click", () => {
-      this.config.enabled = !this.config.enabled;
-      saveConfig(this.config);
-      if (!this.config.enabled) this.stop("Stopped by user");
-    });
-
-    const options = makeElement("div", "fx-auto-opening-options");
-    const transparency = makeElement("label", "fx-auto-opening-check", "Transparent header");
-    const transparencyInput = document.createElement("input");
-    transparencyInput.type = "checkbox";
-    transparencyInput.checked = this.config.transparentHeader;
-    transparencyInput.addEventListener("change", () => {
-      this.config.transparentHeader = transparencyInput.checked;
-      saveConfig(this.config);
-      this.applyStyle();
-    });
-    transparency.append(transparencyInput);
-    options.append(transparency);
-
-    const editor = document.createElement("textarea");
-    editor.className = "fx-auto-opening-editor";
-    editor.spellcheck = false;
-    editor.value = stepsToText(this.config.steps);
-    editor.title = "One step per line: tick percentage";
-    const apply = makeElement("button", "fx-auto-opening-small", "Apply schedule");
-    apply.type = "button";
-    apply.addEventListener("click", () => {
-      this.config.steps = parseSteps(editor.value);
-      editor.value = stepsToText(this.config.steps);
-      this.state.index = 0;
-      saveConfig(this.config);
-      this.setStatus(`${this.config.steps.length} steps loaded`, "muted");
-    });
-
-    this.status = makeElement("div", "fx-auto-opening-status");
-    this.body.append(this.toggleButton, options, editor, apply, this.status);
-    this.panel.append(this.header, this.body);
-    document.body.append(this.panel);
-    this.enableDragging(collapse);
-    this.setCollapsed(this.config.collapsed, false);
-    this.applyStyle();
-    this.timer = window.setInterval(() => this.step(), CHECK_MS);
-  }
-  enableDragging(collapseButton) {
-    let drag = null;
-    this.header.addEventListener("pointerdown", event => {
-      if (event.target === collapseButton || event.target.closest("button")) return;
-      const rect = this.panel.getBoundingClientRect();
-      drag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
-      this.header.setPointerCapture(event.pointerId);
-    });
-    this.header.addEventListener("pointermove", event => {
-      if (!drag) return;
-      const left = clamp(drag.left + event.clientX - drag.x, 0, Math.max(0, innerWidth - this.panel.offsetWidth));
-      const top = clamp(drag.top + event.clientY - drag.y, 0, Math.max(0, innerHeight - this.panel.offsetHeight));
-      this.panel.style.left = `${left}px`;
-      this.panel.style.top = `${top}px`;
-      this.panel.style.bottom = "auto";
-    });
-    this.header.addEventListener("pointerup", () => { drag = null; });
-    this.header.addEventListener("pointercancel", () => { drag = null; });
-  }
-
-  applyStyle() {
-    this.panel.classList.toggle("fx-auto-opening-transparent", this.config.transparentHeader);
-  }
-
-
-  setCollapsed(value, persist = true) {
-    this.config.collapsed = value;
-    this.panel.classList.toggle("fx-auto-opening-collapsed", value);
-    this.header.querySelector("button").textContent = value ? "+" : "-";
-    this.body.hidden = value;
-    if (persist) saveConfig(this.config);
-  }
-
-  setStatus(text, tone = "muted") {
-    this.state.status = text;
-    this.state.tone = tone;
-    if (this.status) {
-      this.status.textContent = text;
-      this.status.dataset.tone = tone;
-    }
-  }
-
-  stop(reason) {
-    this.config.enabled = false;
+  setEnabled(enabled) {
+    this.config.enabled = Boolean(enabled);
     saveConfig(this.config);
-    this.setStatus(reason, "muted");
+    if (!enabled) this.state.status = "Stopped";
+  }
+
+  setSteps(value) {
+    this.config.steps = Array.isArray(value) ? value : parseSteps(value);
+    this.state.index = 0;
+    saveConfig(this.config);
+    return this.config.steps.slice();
+  }
+
+  getStepsText() { return stepsToText(this.config.steps); }
+  getSnapshot() {
+    return { ...this.state, enabled: this.config.enabled, steps: this.config.steps.slice() };
+  }
+
+  syncCatPanel() {
+    if (!window.__fx?.settings?.showAutoOpening) {
+      this.catControls?.box.remove();
+      this.catControls = null;
+      return;
+    }
+    const panel = document.getElementById("frontier-scout");
+    if (!panel) return;
+    const existing = panel.querySelector("[data-fx-auto-opening-controls]");
+    if (existing) {
+      if (this.catControls?.box === existing) return;
+      existing.remove();
+    }
+    const groups = [...panel.querySelectorAll("details")];
+    const opening = groups.find(group => group.querySelector("summary")?.textContent.includes("Opening card"));
+    if (!opening) return;
+    const body = opening.querySelector("div");
+    if (!body) return;
+    const box = document.createElement("div");
+    box.dataset.fxAutoOpeningControls = "1";
+    box.style.cssText = "margin-top:8px;padding-top:8px;border-top:1px solid #49625c";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = "Start auto opening";
+    toggle.style.cssText = "width:100%;padding:6px;background:#243d34;color:white;border:1px solid #8aad94;cursor:pointer";
+    const schedule = document.createElement("textarea");
+    schedule.value = this.getStepsText();
+    schedule.title = "One step per line: tick percentage";
+    schedule.style.cssText = "display:block;box-sizing:border-box;width:100%;height:70px;margin-top:6px;background:#122620;color:white;border:1px solid #719280;padding:5px;font:12px monospace";
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.textContent = "Apply auto schedule";
+    apply.style.cssText = "width:100%;margin-top:5px;padding:5px;background:#243d34;color:white;border:1px solid #8aad94;cursor:pointer";
+    const status = document.createElement("small");
+    status.style.cssText = "display:block;min-height:18px;margin-top:5px;color:#b7c8bc";
+    toggle.onclick = () => this.setEnabled(!this.config.enabled);
+    apply.onclick = () => { this.setSteps(schedule.value); };
+    box.append(toggle, schedule, apply, status);
+    body.append(box);
+    panel.dataset.fxAutoOpening = "1";
+    this.catControls = { panel, box, toggle, schedule, status };
+  }
+
+  updateCatPanel() {
+    const controls = this.catControls;
+    if (!controls || !controls.box.isConnected) { this.catControls = null; return; }
+    const snapshot = this.getSnapshot();
+    controls.toggle.textContent = snapshot.enabled ? "Stop auto opening" : "Start auto opening";
+    controls.status.textContent = snapshot.status;
+    controls.status.style.color = snapshot.tone === "on" ? "#b9f2c9" : "#b7c8bc";
+  }
+
+  stop
+  stop(reason = "Stopped") {
+    this.setEnabled(false);
+    this.state.status = reason;
   }
 
   resetRun() {
@@ -240,29 +164,29 @@ class AutoOpening {
 
   step() {
     const w = gameApi();
-    if (!w) {
-      this.setStatus("Waiting for game API");
+    if (!w) return;
+    if (!w.__fx?.settings?.showAutoOpening) {
+      this.stop("Disabled in FX settings");
       return;
     }
     if (!this.config.enabled) {
-      this.setStatus("Disabled");
-      this.toggleButton.textContent = "Start auto opening";
+      this.state.status = "Stopped";
+      this.state.tone = "muted";
       return;
     }
-    this.toggleButton.textContent = "Stop auto opening";
-    if (!isSingleplayer(w)) {
-      this.setStatus("Paused: local singleplayer only");
+    if (w.aE.lE !== true || w.aE.hi === true) {
+      this.state.status = "Paused: local singleplayer only";
+      this.state.tone = "muted";
       return;
     }
 
     const player = w.aE.fJ;
     const neutral = w.aE.fW;
-    const tick = tickOf(w);
-    const playing = Number.isInteger(player) && Number.isInteger(neutral) &&
-      w.bD.gv.hk(1) && w.bD.gv.hl(player) && (w.ah.hN[player] | 0) > 0;
+    const tick = typeof w.bi?.kr === "function" ? w.bi.kr() : null;
+    const playing = Number.isInteger(player) && Number.isInteger(neutral) && w.bD.gv.hk(1) && w.bD.gv.hl(player) && (w.ah.hN[player] | 0) > 0;
     if (!playing || tick === null) {
       this.state.wasInGame = false;
-      this.setStatus("Waiting for local game");
+      this.state.status = "Waiting for local game";
       return;
     }
     if (!this.state.wasInGame || (this.state.lastTick >= 0 && tick < this.state.lastTick)) this.resetRun();
@@ -284,12 +208,12 @@ class AutoOpening {
       }
     }
 
-    if (this.state.index >= this.config.steps.length) {
-      this.setStatus(`Complete: ${this.state.sent} sent, ${this.state.skipped} skipped`, "on");
-      return;
+    if (this.state.index >= this.config.steps.length) this.state.status = `Complete: ${this.state.sent} sent, ${this.state.skipped} skipped`;
+    else {
+      const next = this.config.steps[this.state.index];
+      this.state.status = `Next: ${next.p.toFixed(2)}% at tick ${next.t} (now ${tick})`;
     }
-    const next = this.config.steps[this.state.index];
-    this.setStatus(`Next: ${next.p.toFixed(2)}% at tick ${next.t} (now ${tick})`, "on");
+    this.state.tone = "on";
   }
 }
 
