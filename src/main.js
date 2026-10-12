@@ -21,6 +21,7 @@ import nameFilter from './nameFilter.js';
 import followedAccounts from './followedAccounts.js';
 import boatTracker from './boatTracker.js';
 import autoSpawnPreview from './autoSpawnPreview.js';
+import autoOpening from './autoOpening.js';
 
 window.__fx = window.__fx || {};
 const __fx = window.__fx;
@@ -55,5 +56,6 @@ __fx.nameFilter = nameFilter;
 __fx.followedAccounts = followedAccounts;
 __fx.boatTracker = boatTracker;
 __fx.autoSpawnPreview = autoSpawnPreview;
+__fx.autoOpening = autoOpening;
 
 console.log('Successfully loaded FX Client');
