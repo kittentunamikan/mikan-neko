@@ -21,6 +21,9 @@ import nameFilter from './nameFilter.js';
 import followedAccounts from './followedAccounts.js';
 import boatTracker from './boatTracker.js';
 import autoSpawnPreview from './autoSpawnPreview.js';
+import('./mikanUI.js');
+import('./autoOpening.js');
+import('./unifiedPanel.js');
 
 window.__fx = window.__fx || {};
 const __fx = window.__fx;
