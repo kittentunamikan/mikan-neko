@@ -414,7 +414,7 @@ waitForDeps(function() {
       }
       setRecStatus("录制中 · tick " + (kr == null ? "?" : kr) + " / " + recCfg.window + " · " + rec.steps.length + " 步", "on");
     } else {
-      setRecStatus(recCfg.auto ? "本局录制已结束" : "点"开始录制"可从现在开始");
+      setRecStatus(recCfg.auto ? "本局录制已结束" : "点‘开始录制’可从现在开始");
     }
   }
   
