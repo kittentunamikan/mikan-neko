@@ -48,8 +48,9 @@ var settings = {
   mutePingLanguage: false,
   mutePingDirect: false,
   hideInappropriateNames: false,
-  followedAccountNicknames: {}
-};
+  followedAccountNicknames: {},
+  enableMikanImgui: true
+ };
 __fx.settings = settings;
 const discontinuedSettings = ["hideAllLinks", "fontName"];
 __fx.makeMainMenuTransparent = false;
@@ -449,6 +450,7 @@ const settingsManager = new (function () {
   }
   const settingsStructure = [
     MeowSettingsSection,
+    { for: "enableMikanImgui", type: "checkbox", label: "Enable Mikan ImGui menu", note: "Shows the Auto opening, Opening recorder, and Settings menu", onChange: (enabled) => window.__mikanImgui?.setEnabled(enabled) },
     { for: "showAutoSpawnPreview", type: "checkbox", label: "Preview automatic spawn positions", note: "Predicted from current selections; positions may change before the countdown ends" },
     { for: "showBoatTrajectories", type: "checkbox", label: "Show boat trajectories and landing points", note: "Draws each boat's route and marks where it will land" },
     { for: "showBoatTroops", type: "checkbox", label: "Show troops on boats (next to landing point)" },
@@ -636,6 +638,7 @@ const settingsManager = new (function () {
     label.append(element);
     if (item.type === "checkbox") {
       element.type = "checkbox";
+      if (item.onChange) element.addEventListener("change", () => item.onChange(element.checked));
       const checkmark = document.createElement("span");
       checkmark.className = "checkmark";
       label.className = "checkbox";
